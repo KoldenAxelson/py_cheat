@@ -14,8 +14,14 @@ fn main() {
             manager.show_available_sheets();
             Ok(())
         }
-        2 => manager.show_full_sheet(&args[1]),
-        3 => manager.show_section(&args[1], &args[2]),
+        2 => manager.show_sheet_outline(&args[1]),
+        3 => {
+            if args[2] == "0" {
+                manager.show_full_sheet(&args[1])
+            } else {
+                manager.show_section(&args[1], &args[2])
+            }
+        }
         _ => Err("Usage: py_cheat [sheet_name] [section_number]".into()),
     };
 

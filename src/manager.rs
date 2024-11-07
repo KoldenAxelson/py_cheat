@@ -41,6 +41,17 @@ impl CheatSheetManager {
         }
     }
 
+    pub fn show_sheet_outline(&self, sheet_name: &str) -> Result<(), Box<dyn Error>> {
+        let content = self
+            .get_sheet_content(sheet_name)
+            .ok_or_else(|| format!("Could not find sheet {}", sheet_name))?;
+
+        let cheat_sheet = CheatSheet::parse(content)?;
+        println!("{}", self.highlighter.format_header(sheet_name, true));
+        self.print_sections(&cheat_sheet.sections);
+        Ok(())
+    }
+
     fn print_sections(&self, sections: &[crate::cheatsheet::Section]) {
         for (i, section) in sections.iter().enumerate() {
             let prefix = if i == sections.len() - 1 {
