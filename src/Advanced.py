@@ -1,34 +1,58 @@
 # Python Advanced Concepts Cheat Sheet
 
 # -----------------------------
-# 1. METACLASSES
+# 1. METAPROGRAMMING
 # -----------------------------
-print("\n=== Metaclasses ===")
+print("\n=== Metaprogramming ===")
 
+# Basic Metaclass
 class MetaLogger(type):
     def __new__(cls, name, bases, attrs):
-        # Log attribute creation
         print(f"\nCreating class: {name}")
         for key, value in attrs.items():
             if not key.startswith('__'):
                 print(f"Attribute: {key} = {value}")
         return super().__new__(cls, name, bases, attrs)
 
-class MyClass(metaclass=MetaLogger):
-    x = 1
-    y = 2
-    def method(self):
-        pass
+# Metaclass with Method Interception
+class MetaValidator(type):
+    def __new__(cls, name, bases, attrs):
+        for key, value in attrs.items():
+            if callable(value) and not key.startswith('__'):
+                attrs[key] = cls.validate_types(value)
+        return super().__new__(cls, name, bases, attrs)
+    
+    @staticmethod
+    def validate_types(func):
+        def wrapper(*args, **kwargs):
+            # Validate types using annotations
+            for arg, value in zip(func.__annotations__, args[1:]):
+                if not isinstance(value, func.__annotations__[arg]):
+                    raise TypeError(f"Argument {arg} must be {func.__annotations__[arg]}")
+            return func(*args, **kwargs)
+        return wrapper
+
+# Class Factory
+def create_dataclass(class_name, **fields):
+    return type(class_name, (), {
+        '__init__': lambda self, **kwargs: setattr(self, '__dict__', kwargs),
+        '__repr__': lambda self: f"{class_name}({', '.join(f'{k}={v!r}' for k, v in self.__dict__.items())})",
+        **fields
+    })
 
 # -----------------------------
-# 2. DESCRIPTORS
+# 2. DESCRIPTOR PATTERNS
 # -----------------------------
-print("\n=== Descriptors ===")
+print("\n=== Descriptor Patterns ===")
 
-class ValidString:
-    def __init__(self, minlen=0, maxlen=None):
-        self.minlen = minlen
-        self.maxlen = maxlen
+# Data Descriptor
+class ValidatedField:
+    def __init__(self, *validators):
+        self.validators = validators
+        self.name = None
+    
+    def __set_name__(self, owner, name):
+        self.name = name
     
     def __get__(self, instance, owner):
         if instance is None:
@@ -36,308 +60,334 @@ class ValidString:
         return instance.__dict__.get(self.name)
     
     def __set__(self, instance, value):
-        if not isinstance(value, str):
-            raise TypeError('Value must be a string')
-        if len(value) < self.minlen:
-            raise ValueError(f'String must be at least {self.minlen} characters')
-        if self.maxlen and len(value) > self.maxlen:
-            raise ValueError(f'String must be at most {self.maxlen} characters')
+        for validator in self.validators:
+            validator(value)
         instance.__dict__[self.name] = value
+
+# Validators
+def min_length(min_len):
+    def validate(value):
+        if len(value) < min_len:
+            raise ValueError(f"Length must be at least {min_len}")
+    return validate
+
+def max_length(max_len):
+    def validate(value):
+        if len(value) > max_len:
+            raise ValueError(f"Length must be at most {max_len}")
+    return validate
+
+def pattern(regex):
+    import re
+    def validate(value):
+        if not re.match(regex, value):
+            raise ValueError(f"Value must match pattern {regex}")
+    return validate
+
+# -----------------------------
+# 3. ADVANCED TYPE SYSTEM
+# -----------------------------
+print("\n=== Advanced Type System ===")
+
+from typing import (
+    TypeVar, Generic, Callable, Union, Optional,
+    Literal, TypedDict, NewType, Protocol,
+    runtime_checkable
+)
+
+# Generic Types
+T = TypeVar('T')
+S = TypeVar('S', bound='Stringable')
+
+class Stringable(Protocol):
+    def __str__(self) -> str: ...
+
+class Container(Generic[T]):
+    def __init__(self, item: T):
+        self.item = item
     
-    def __set_name__(self, owner, name):
-        self.name = name
-
-class User:
-    username = ValidString(minlen=3, maxlen=15)
-    password = ValidString(minlen=8, maxlen=20)
-
-# Test descriptors
-user = User()
-try:
-    user.username = "Jo"  # Will raise ValueError
-except ValueError as e:
-    print(f"\nValidation error: {e}")
-
-# -----------------------------
-# 3. ABSTRACT BASE CLASSES
-# -----------------------------
-print("\n=== Abstract Base Classes ===")
-
-from abc import ABC, abstractmethod
-from typing import Protocol
-
-class DataProcessor(ABC):
-    @abstractmethod
-    def process(self, data: list) -> list:
-        pass
+    def get(self) -> T:
+        return self.item
     
-    @abstractmethod
-    def validate(self, data: list) -> bool:
-        pass
+    def transform(self, func: Callable[[T], S]) -> 'Container[S]':
+        return Container(func(self.item))
 
-# Protocol for duck typing
-class Drawable(Protocol):
-    def draw(self) -> None: ...
+# Custom Types
+UserId = NewType('UserId', int)
+
+class UserData(TypedDict):
+    name: str
+    age: int
+    active: bool
+
+# Runtime Protocol
+@runtime_checkable
+class Renderable(Protocol):
+    def render(self) -> str: ...
 
 # -----------------------------
-# 4. ASYNCIO AND COROUTINES
+# 4. ASYNCHRONOUS PROGRAMMING
 # -----------------------------
-print("\n=== Asyncio and Coroutines ===")
+print("\n=== Asynchronous Programming ===")
 
 import asyncio
+from typing import AsyncIterator
 
-async def async_operation(sec: int) -> str:
-    await asyncio.sleep(sec)
-    return f"Operation completed after {sec} seconds"
-
-async def main():
-    # Gather multiple coroutines
-    results = await asyncio.gather(
-        async_operation(1),
-        async_operation(2)
-    )
-    print(f"\nAsync results: {results}")
-
-# Run async code
-try:
-    asyncio.run(main())
-except RuntimeError:
-    print("\nAsync code example (skipped in regular Python file)")
-
-# -----------------------------
-# 5. ADVANCED ITERATORS
-# -----------------------------
-print("\n=== Advanced Iterators ===")
-
-class CircularBuffer:
-    def __init__(self, size: int):
-        self.size = size
-        self.buffer = [None] * size
-        self.position = 0
-        self.counter = 0
+# Async Context Manager
+class AsyncResource:
+    async def __aenter__(self):
+        await self.open()
+        return self
     
-    def add(self, item):
-        self.buffer[self.position] = item
-        self.position = (self.position + 1) % self.size
-        self.counter += 1
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
     
-    def __iter__(self):
-        idx = self.position - 1 if self.counter > 0 else 0
-        items_seen = 0
-        
-        while items_seen < min(self.counter, self.size):
-            if idx < 0:
-                idx = self.size - 1
-            yield self.buffer[idx]
-            idx -= 1
-            items_seen += 1
+    async def open(self):
+        await asyncio.sleep(0.1)
+        print("Resource opened")
+    
+    async def close(self):
+        await asyncio.sleep(0.1)
+        print("Resource closed")
 
-# Test circular buffer
-buffer = CircularBuffer(3)
-for i in range(5):
-    buffer.add(i)
-print("\nCircular buffer contents:", list(buffer))
+# Async Iterator
+class AsyncRange:
+    def __init__(self, start: int, stop: int):
+        self.start = start
+        self.stop = stop
+    
+    def __aiter__(self):
+        return self
+    
+    async def __anext__(self):
+        if self.start >= self.stop:
+            raise StopAsyncIteration
+        await asyncio.sleep(0.1)
+        self.start += 1
+        return self.start - 1
+
+# Async Generator
+async def async_generator(n: int) -> AsyncIterator[int]:
+    for i in range(n):
+        await asyncio.sleep(0.1)
+        yield i
 
 # -----------------------------
-# 6. ADVANCED DECORATORS
+# 5. MEMORY MANAGEMENT
 # -----------------------------
-import time
+print("\n=== Memory Management ===")
 
-print("\n=== Advanced Decorators ===")
+import weakref
+import gc
+from contextlib import suppress
 
-def retry(max_attempts, delay=1):
-    def decorator(func):
-        async def async_wrapper(*args, **kwargs):
-            for attempt in range(max_attempts):
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    if attempt == max_attempts - 1:
-                        raise
-                    print(f"Attempt {attempt + 1} failed: {e}")
-                    await asyncio.sleep(delay)
-        
-        def sync_wrapper(*args, **kwargs):
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if attempt == max_attempts - 1:
-                        raise
-                    print(f"Attempt {attempt + 1} failed: {e}")
-                    time.sleep(delay)
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    return decorator
+# Custom Reference Counting
+class RefCounted:
+    _instances = {}
+    
+    def __init__(self, name):
+        self.name = name
+        self.__class__._instances[name] = self.__class__._instances.get(name, 0) + 1
+    
+    def __del__(self):
+        with suppress(KeyError):
+            self.__class__._instances[self.name] -= 1
+            if self.__class__._instances[self.name] == 0:
+                del self.__class__._instances[self.name]
 
-@retry(max_attempts=3)
-def might_fail():
-    import random
-    if random.random() < 0.7:
-        raise ValueError("Random failure")
-    return "Success!"
+# Weak References
+class Cache:
+    def __init__(self):
+        self._cache = weakref.WeakKeyDictionary()
+    
+    def get(self, key, default=None):
+        return self._cache.get(key, default)
+    
+    def set(self, key, value):
+        self._cache[key] = value
 
-print("\nTesting retry decorator:")
-try:
-    result = might_fail()
-    print(f"Result: {result}")
-except ValueError as e:
-    print(f"Final failure: {e}")
+# Memory Profiling
+class MemoryTracker:
+    def __init__(self):
+        self.start_stats = None
+    
+    def __enter__(self):
+        gc.collect()
+        self.start_stats = gc.get_stats()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        gc.collect()
+        end_stats = gc.get_stats()
+        for i, (start, end) in enumerate(zip(self.start_stats, end_stats)):
+            print(f"Generation {i}:")
+            print(f"  Collections: {end[0] - start[0]}")
+            print(f"  Objects collected: {end[1] - start[1]}")
+
+# -----------------------------
+# 6. ADVANCED CONCURRENCY
+# -----------------------------
+print("\n=== Advanced Concurrency ===")
+
+import threading
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from queue import Queue
+import multiprocessing
+
+# Thread-Safe Singleton
+class Singleton:
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+# Producer-Consumer Pattern
+class ProducerConsumer:
+    def __init__(self, size):
+        self.queue = Queue(size)
+    
+    def producer(self, items):
+        for item in items:
+            self.queue.put(item)
+    
+    def consumer(self):
+        while True:
+            item = self.queue.get()
+            if item is None:
+                break
+            # Process item
+            print(f"Processing {item}")
+            self.queue.task_done()
+
+# Process Pool with Shared Memory
+def parallel_process(func):
+    def wrapper(*args, **kwargs):
+        with ProcessPoolExecutor() as executor:
+            return executor.map(func, *args)
+    return wrapper
 
 # -----------------------------
 # 7. ADVANCED CONTEXT MANAGERS
 # -----------------------------
 print("\n=== Advanced Context Managers ===")
 
-from typing import Optional, Any
+from typing import Optional, Any, ContextManager
 from types import TracebackType
-import threading
+from contextlib import contextmanager, ExitStack
 
-class ResourcePool:
-    def __init__(self, size: int):
-        print(f"\nInitializing ResourcePool with {size} resources")
-        self.resources = [self._create_resource() for _ in range(size)]
-        self._lock = threading.Lock()
-        print("Available resources:", [r["id"] for r in self.resources])
-        
-    def _create_resource(self):
-        resource = {"id": id(object()), "in_use": False}
-        print(f"Created resource with id: {resource['id']}")
-        return resource
+# Reentrant Context Manager
+class ReentrantLock:
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._depth = 0
     
     def __enter__(self):
-        print("\nAttempting to acquire resource...")
-        with self._lock:
-            print("Lock acquired, searching for available resource")
-            for resource in self.resources:
-                if not resource["in_use"]:
-                    resource["in_use"] = True
-                    print(f"Resource {resource['id']} allocated")
-                    # Store the current resource for __exit__
-                    self._current_resource = resource
-                    return resource
-            print("No available resources found!")
-            raise RuntimeError("No available resources")
+        self._lock.acquire()
+        self._depth += 1
+        return self
     
-    def __exit__(self, exc_type: Optional[type],
-                 exc_val: Optional[Exception],
-                 exc_tb: Optional[TracebackType]) -> bool:
-        print("\nReleasing resource...")
-        with self._lock:
-            if hasattr(self, '_current_resource'):
-                self._current_resource["in_use"] = False
-                print(f"Resource {self._current_resource['id']} released")
-                delattr(self, '_current_resource')
-        print("Resource release completed")
-        return False  # Don't suppress exceptions
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._depth -= 1
+        self._lock.release()
+        return False
 
-# Demonstrate usage of ResourcePool
-print("\nDemonstrating ResourcePool usage:")
-pool = ResourcePool(2)  # Create pool with 2 resources
+# Dynamic Context Manager
+class DynamicContext:
+    def __init__(self, enter_func, exit_func):
+        self.enter_func = enter_func
+        self.exit_func = exit_func
+    
+    def __enter__(self):
+        return self.enter_func()
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.exit_func(exc_type, exc_val, exc_tb)
 
-# Example 1: Successfully acquire and release resource
-print("\nExample 1: Basic resource acquisition")
-with pool as resource1:
-    print(f"Using resource: {resource1['id']}")
-    print("Doing some work with the resource...")
-print("Resource should now be released")
-
-# Example 2: Try to use multiple resources simultaneously
-print("\nExample 2: Multiple resource acquisition")
-try:
-    with pool as resource1:
-        print(f"Acquired first resource: {resource1['id']}")
-        with pool as resource2:
-            print(f"Acquired second resource: {resource2['id']}")
-            print("Using both resources...")
-        print("Second resource released")
-    print("First resource released")
-except RuntimeError as e:
-    print(f"Caught expected error: {e}")
-
-# Example 3: Error handling
-print("\nExample 3: Error handling in context manager")
-try:
-    with pool as resource:
-        print(f"Acquired resource: {resource['id']}")
-        raise ValueError("Simulated error")
-except ValueError as e:
-    print(f"Caught error: {e}")
-print("Resource should be released even after error")
-
-# Show final pool state
-print("\nFinal pool state:")
-print("Available resources:", [r["id"] for r in pool.resources if not r["in_use"]])
+# Nested Context Managers
+@contextmanager
+def nested_contexts(*managers):
+    with ExitStack() as stack:
+        yield tuple(stack.enter_context(mgr) for mgr in managers)
 
 # -----------------------------
-# 8. ADVANCED TYPE HINTS
+# 8. ADVANCED INTROSPECTION
 # -----------------------------
-print("\n=== Advanced Type Hints ===")
+print("\n=== Advanced Introspection ===")
 
-from typing import TypeVar, Generic, Callable, Union, Optional
-from dataclasses import dataclass
+import inspect
+import sys
 
-T = TypeVar('T')
-S = TypeVar('S')
-
-class Stack(Generic[T]):
-    def __init__(self) -> None:
-        self._items: list[T] = []
-    
-    def push(self, item: T) -> None:
-        self._items.append(item)
-    
-    def pop(self) -> T:
-        return self._items.pop()
-    
-    def map(self, func: Callable[[T], S]) -> 'Stack[S]':
-        new_stack = Stack[S]()
-        for item in self._items:
-            new_stack.push(func(item))
-        return new_stack
-
-@dataclass
-class Result(Generic[T]):
-    value: Optional[T]
-    error: Optional[str] = None
-    
+# Class Inspector
+class Inspector:
     @classmethod
-    def success(cls, value: T) -> 'Result[T]':
-        return cls(value=value)
+    def inspect_class(cls, target_class):
+        # Get all members
+        members = inspect.getmembers(target_class)
+        
+        # Categorize members
+        methods = inspect.getmembers(target_class, predicate=inspect.isfunction)
+        properties = inspect.getmembers(target_class, predicate=inspect.isdatadescriptor)
+        attributes = {name: value for name, value in members 
+                     if not name.startswith('__') 
+                     and not inspect.isfunction(value)
+                     and not inspect.isdatadescriptor(value)}
+        
+        return {
+            'methods': methods,
+            'properties': properties,
+            'attributes': attributes
+        }
     
-    @classmethod
-    def failure(cls, error: str) -> 'Result[T]':
-        return cls(value=None, error=error)
-
-# Test advanced types
-number_stack: Stack[int] = Stack()
-number_stack.push(1)
-number_stack.push(2)
-string_stack = number_stack.map(str)
-print(f"\nConverted stack: {string_stack._items}")
+    @staticmethod
+    def get_source(obj):
+        return inspect.getsource(obj)
+    
+    @staticmethod
+    def get_signature(func):
+        return inspect.signature(func)
 
 # -----------------------------
-# 9. ADVANCED MEMORY MANAGEMENT
+# 9. ADVANCED DEBUGGING
 # -----------------------------
-print("\n=== Advanced Memory Management ===")
+print("\n=== Advanced Debugging ===")
 
-import weakref
-import gc
+import sys
+import traceback
 
-class ExpensiveResource:
-    def __init__(self, name: str):
-        self.name = name
+# Custom Exception Hook
+def custom_exception_hook(exc_type, exc_value, exc_traceback):
+    print("Exception occurred:")
+    print("Type:", exc_type.__name__)
+    print("Value:", str(exc_value))
+    print("Traceback:")
+    traceback.print_tb(exc_traceback)
+
+# Debug Context
+@contextmanager
+def debug_context():
+    old_hook = sys.excepthook
+    sys.excepthook = custom_exception_hook
+    try:
+        yield
+    finally:
+        sys.excepthook = old_hook
+
+# Traceback Manager
+class TracebackManager:
+    def __init__(self):
+        self.stored_traceback = None
     
-    def __del__(self):
-        print(f"\nResource {self.name} deallocated")
-
-# Weak references
-resource = ExpensiveResource("test")
-weak_ref = weakref.ref(resource)
-print(f"Weak reference alive: {weak_ref() is not None}")
-del resource
-print(f"Weak reference after deletion: {weak_ref() is not None}")
-
-# Manual garbage collection
-gc.collect()
-print(f"Garbage collector statistics: {gc.get_stats()}")
+    def capture(self):
+        try:
+            raise Exception("Capture point")
+        except Exception:
+            self.stored_traceback = sys.exc_info()[2].tb_next
+    
+    def print_traceback(self):
+        if self.stored_traceback:
+            traceback.print_tb(self.stored_traceback)
